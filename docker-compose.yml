@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-bankit}
+      POSTGRES_USER: ${POSTGRES_USER:-bankit}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bankit}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bankit} -d ${POSTGRES_DB:-bankit}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: dev
+      PORT: 8080
+      DATABASE_URL: postgresql://${POSTGRES_USER:-bankit}:${POSTGRES_PASSWORD:-bankit}@postgres:5432/${POSTGRES_DB:-bankit}?schema=public
+      BANKIT_API_USERNAME: ${BANKIT_API_USERNAME:-test-client}
+      BANKIT_API_PASSWORD: ${BANKIT_API_PASSWORD:-test-password}
+      SWAGGER_ENABLED: ${SWAGGER_ENABLED:-true}
+      BANKIT_CUSTOMER_A_ACCOUNT_ID: ${BANKIT_CUSTOMER_A_ACCOUNT_ID:-4460e9d1-c459-4752-9cc4-cf6a6ecb9cab}
+      BANKIT_CUSTOMER_B_ACCOUNT_ID: ${BANKIT_CUSTOMER_B_ACCOUNT_ID:-4d86d928-f3b7-4544-a96d-a14cd4c4d602}
+      BANKIT_CUSTOMER_A_ACCOUNT_NUMBER: ${BANKIT_CUSTOMER_A_ACCOUNT_NUMBER:-0123456789}
+      BANKIT_CUSTOMER_B_ACCOUNT_NUMBER: ${BANKIT_CUSTOMER_B_ACCOUNT_NUMBER:-0123456790}
+      BANKIT_CUSTOMER_A_BALANCE: ${BANKIT_CUSTOMER_A_BALANCE:-100000}
+      BANKIT_CUSTOMER_B_BALANCE: ${BANKIT_CUSTOMER_B_BALANCE:-50000}
+      BANKIT_CUSTOMER_CURRENCY: ${BANKIT_CUSTOMER_CURRENCY:-NGN}
+    ports:
+      - "${SERVER_PORT:-8080}:8080"

@@ -1,0 +1,71 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TransactionStatus {
+  SUCCESS
+  FAILED_INSUFFICIENT_FUNDS
+  FAILED_ACCOUNT_NOT_FOUND
+  FAILED_CURRENCY_MISMATCH
+  FAILED_INVALID_REQUEST
+  FAILED_SYSTEM
+}
+
+model User {
+  id        String    @id @default(uuid()) @db.Uuid
+  name      String
+  email     String    @unique
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  accounts  Account[]
+
+  @@map("users")
+}
+
+model Account {
+  id               String        @id @default(uuid()) @db.Uuid
+  userId           String        @map("user_id") @db.Uuid
+  accountNumber    String        @unique @map("account_number") @db.VarChar(10)
+  balanceMinor     BigInt        @map("balance_minor")
+  currency         String        @db.Char(3)
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  user             User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  sentTransactions Transaction[] @relation("sender")
+  receivedTransactions Transaction[] @relation("recipient")
+
+  @@index([accountNumber])
+  @@map("accounts")
+}
+
+model Transaction {
+  id                String            @id @default(uuid()) @db.Uuid
+  reference         String            @unique
+  senderAccountId   String?           @map("sender_account_id") @db.Uuid
+  recipientAccountId String?          @map("recipient_account_id") @db.Uuid
+  amountMinor       BigInt            @map("amount_minor")
+  currency          String            @db.Char(3)
+  status            TransactionStatus
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  sender            Account?          @relation("sender", fields: [senderAccountId], references: [id], onDelete: Restrict)
+  recipient         Account?          @relation("recipient", fields: [recipientAccountId], references: [id], onDelete: Restrict)
+
+  @@index([senderAccountId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([recipientAccountId, createdAt(sort: Desc), id(sort: Desc)])
+  @@map("transactions")
+}
+
+model IdempotencyKey {
+  key          String   @id @db.VarChar(255)
+  requestHash  String   @map("request_hash")
+  reference    String?
+  httpStatus   Int?     @map("http_status")
+  responseJson Json?    @map("response_json")
+  completed    Boolean  @default(false)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("idempotency_keys")
+}
