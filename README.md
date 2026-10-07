@@ -1,4 +1,4 @@
-# Bankit Transfer Service — NestJS + Prisma
+# Bankit Transfer Service
 
 This is a parallel rewrite of the Java/Spring Boot service in the parent directory. The Java project is intentionally unchanged.
 
