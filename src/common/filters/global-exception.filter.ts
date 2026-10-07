@@ -11,6 +11,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       response.status(exception.status).json(failure(exception.code, exception.message));
       return;
     }
+
     if (exception instanceof HttpException) {
       const body = exception.getResponse();
       const raw = typeof body === 'object' && body !== null && 'message' in body ? (body as { message?: unknown }).message : undefined;
@@ -18,6 +19,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       response.status(exception.getStatus()).json(failure('INVALID_REQUEST', message));
       return;
     }
+
     response.status(HttpStatus.INTERNAL_SERVER_ERROR).json(failure('TRANSFER_FAILED', 'The transfer could not be completed'));
   }
 }

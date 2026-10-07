@@ -34,45 +34,70 @@ export class TransfersService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(request: CreateTransferDto, idempotencyKey: string | undefined): Promise<{ result: TransferCreatedResponse; status: number }> {
-    if (!idempotencyKey?.trim() || idempotencyKey.length > 255) throw new DomainError(400, 'INVALID_REQUEST', 'A valid Idempotency-Key header is required');
+    if (!idempotencyKey?.trim() || idempotencyKey.length > 255) {
+        throw new DomainError(400, 'INVALID_REQUEST', 'A valid Idempotency-Key header is required');
+    }
     const senderId = this.parseUuid(request.senderAccountId);
     const recipientId = this.parseUuid(request.recipientAccountId);
     const amountMinor = toMinor(request.amount);
     const hash = createHash('sha256').update(`${senderId}|${recipientId}|${new Decimal(String(request.amount)).toFixed(2)}`).digest('hex');
+
     const outcome = await this.prisma.$transaction(async (tx) => {
       const claim = await tx.idempotencyKey.createMany({ data: { key: idempotencyKey, requestHash: hash }, skipDuplicates: true });
       if (claim.count === 0) {
         const existing = await tx.idempotencyKey.findUnique({ where: { key: idempotencyKey } });
-        if (!existing) throw new Error('Idempotency record disappeared');
-        if (existing.requestHash !== hash) return this.failure(existing.reference ?? '', 409, 'IDEMPOTENCY_KEY_REUSED', 'The idempotency key was already used for a different transfer');
+        if (!existing) {
+            throw new Error('Idempotency record disappeared');
+        }
+        if (existing.requestHash !== hash) {
+            return this.failure(existing.reference ?? '', 409, 'IDEMPOTENCY_KEY_REUSED', 'The idempotency key was already used for a different transfer');
+        }
         const stored = existing.responseJson as unknown as Outcome | null;
-        if (!stored) throw new Error('Idempotency response is incomplete');
+
+        if (!stored) {
+            throw new Error('Idempotency response is incomplete');
+        }
+
         return stored.ok ? { ...stored, status: 200 } : stored;
       }
 
       const reference = `TRX-${ulid()}`;
-      if (senderId === recipientId) return this.completeFailure(tx, idempotencyKey, reference, 409, 'INVALID_REQUEST', 'Sender and recipient accounts must be different', TransactionStatus.FAILED_INVALID_REQUEST);
+      if (senderId === recipientId) {
+          return this.completeFailure(tx, idempotencyKey, reference, 409, 'INVALID_REQUEST', 'Sender and recipient accounts must be different', TransactionStatus.FAILED_INVALID_REQUEST);
+      }
       const ids = [senderId, recipientId].sort();
       const accounts = await tx.$queryRaw<LockedAccount[]>(Prisma.sql`SELECT id::text, balance_minor, currency FROM accounts WHERE id IN (${Prisma.join(ids.map((id) => Prisma.sql`${id}::uuid`))}) ORDER BY id FOR UPDATE`);
       const sender = accounts.find((account) => account.id === senderId);
       const recipient = accounts.find((account) => account.id === recipientId);
-      if (!sender || !recipient) return this.completeFailure(tx, idempotencyKey, reference, 404, 'ACCOUNT_NOT_FOUND', 'One or both accounts do not exist', TransactionStatus.FAILED_ACCOUNT_NOT_FOUND);
+
+      if (!sender || !recipient) {
+          return this.completeFailure(tx, idempotencyKey, reference, 404, 'ACCOUNT_NOT_FOUND', 'One or both accounts do not exist', TransactionStatus.FAILED_ACCOUNT_NOT_FOUND);
+      }
+
       if (sender.currency !== recipient.currency) {
         await tx.transaction.create({ data: { reference, senderAccountId: senderId, recipientAccountId: recipientId, amountMinor, currency: sender.currency, status: TransactionStatus.FAILED_CURRENCY_MISMATCH } });
         return this.completeFailure(tx, idempotencyKey, reference, 409, 'CURRENCY_MISMATCH', 'Sender and recipient currencies must match', TransactionStatus.FAILED_CURRENCY_MISMATCH);
       }
+
       if (sender.balance_minor < amountMinor) {
         await tx.transaction.create({ data: { reference, senderAccountId: senderId, recipientAccountId: recipientId, amountMinor, currency: sender.currency, status: TransactionStatus.FAILED_INSUFFICIENT_FUNDS } });
         return this.completeFailure(tx, idempotencyKey, reference, 422, 'INSUFFICIENT_FUNDS', 'Insufficient account balance', TransactionStatus.FAILED_INSUFFICIENT_FUNDS);
       }
+
       const debit = await tx.$executeRaw(Prisma.sql`UPDATE accounts SET balance_minor = balance_minor - ${amountMinor} WHERE id = ${senderId}::uuid AND balance_minor >= ${amountMinor}`);
-      if (debit !== 1) throw new Error('Sender debit did not affect exactly one row');
+      if (debit !== 1) {
+          throw new Error('Sender debit did not affect exactly one row');
+      }
       const credit = await tx.$executeRaw(Prisma.sql`UPDATE accounts SET balance_minor = balance_minor + ${amountMinor} WHERE id = ${recipientId}::uuid`);
-      if (credit !== 1) throw new Error('Recipient credit did not affect exactly one row');
+      if (credit !== 1) {
+          throw new Error('Recipient credit did not affect exactly one row');
+      }
       const transaction = await tx.transaction.create({ data: { reference, senderAccountId: senderId, recipientAccountId: recipientId, amountMinor, currency: sender.currency, status: TransactionStatus.SUCCESS } });
       const response: TransferCreatedResponse = { success: true, reference: transaction.reference, status: transaction.status };
       const outcome: Outcome = { ok: true, status: 201, reference, response };
+
       await tx.idempotencyKey.update({ where: { key: idempotencyKey }, data: { reference, httpStatus: 201, responseJson: outcome as unknown as Prisma.InputJsonValue, completed: true } });
+
       return outcome;
     });
     if (!outcome.ok) throw new DomainError(outcome.status, outcome.error?.code ?? 'TRANSFER_FAILED', outcome.error?.message ?? 'The transfer could not be completed', outcome.reference);
@@ -81,7 +106,10 @@ export class TransfersService {
 
   async get(reference: string): Promise<TransferLookupResponse> {
     const transaction = await this.prisma.transaction.findUnique({ where: { reference } });
-    if (!transaction) throw new DomainError(404, 'NOT_FOUND', 'Transfer not found');
+    if (!transaction) {
+        throw new DomainError(404, 'NOT_FOUND', 'Transfer not found');
+    }
+
     return { reference: transaction.reference, senderAccountId: transaction.senderAccountId ?? '', recipientAccountId: transaction.recipientAccountId ?? '', amount: toMajor(transaction.amountMinor), currency: transaction.currency, status: transaction.status, createdAt: transaction.createdAt };
   }
 
@@ -91,6 +119,7 @@ export class TransfersService {
     } else {
       await tx.idempotencyKey.update({ where: { key }, data: { reference, httpStatus: status, responseJson: this.failure(reference, status, code, message) as unknown as Prisma.InputJsonValue, completed: true } });
     }
+
     return this.failure(reference, status, code, message);
   }
 
